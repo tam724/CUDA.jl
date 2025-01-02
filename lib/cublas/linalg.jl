@@ -13,6 +13,11 @@ LinearAlgebra.rmul!(x::StridedCuArray{<:CublasFloat}, k::Number) =
 LinearAlgebra.rmul!(x::DenseCuArray{<:CublasFloat}, k::Real) =
   invoke(rmul!, Tuple{typeof(x), Number}, x, k)
 
+function LinearAlgebra.rmul!(x::CUDA.DenseCuArray{<:CUDA.CUBLAS.CublasFloat}, k::Bool)
+    k && return x
+    return x .= copysign.(zero(eltype(x)), x)
+end
+
 function LinearAlgebra.dot(x::StridedCuVector{T},
                            y::StridedCuVector{T}) where T<:Union{Float16, CublasReal}
     n = length(x)
