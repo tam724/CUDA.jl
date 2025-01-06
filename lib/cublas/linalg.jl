@@ -13,9 +13,15 @@ LinearAlgebra.rmul!(x::StridedCuArray{<:CublasFloat}, k::Number) =
 LinearAlgebra.rmul!(x::DenseCuArray{<:CublasFloat}, k::Real) =
   invoke(rmul!, Tuple{typeof(x), Number}, x, k)
 
-function LinearAlgebra.rmul!(x::CUDA.DenseCuArray{<:CUDA.CUBLAS.CublasFloat}, k::Bool)
+function LinearAlgebra.rmul!(x::CUDA.DenseCuArray{<:CUDA.CUBLAS.CublasReal}, k::Bool)
     k && return x
     return x .= copysign.(zero(eltype(x)), x)
+end
+
+function LinearAlgebra.rmul!(x::CUDA.DenseCuArray{<:CUDA.CUBLAS.CublasComplex}, k::Bool)
+    k && return x
+    T = real(eltype(x))
+    return x .= Complex.(copysign.(zero(T), real.(x)), copysign.(zero(T), imag.(x)))
 end
 
 function LinearAlgebra.dot(x::StridedCuVector{T},
