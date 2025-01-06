@@ -15,79 +15,144 @@ m = 20
 n = 35
 k = 13
 
+# random Complex number. If with_nan is true, at least one of the real or imaginary part is NaN
+function randnan(T::Type{<:Complex{TB}}; with_nan) where TB
+    if with_nan
+        real = rand(Bool) ? TB(NaN) : randn(TB)
+        if isnan(real)
+            imag = rand(Bool) ? TB(NaN) : randn(TB)
+        else
+            imag = TB(NaN)
+        end
+        return T(real, imag)
+    else
+        return randn(T)
+    end
+end
+# random Real number. If with_nan is true, the number is NaN
+randnan(T::Type{<:Real}; with_nan) = with_nan ? T(NaN) : randn(T)
+
+# random array of T. If with_nan is true, at least one element has NaN components
+function randnan(T, size...; with_nan)
+    A = randn(T, size...)
+    if with_nan
+        # spray in some NaN's (at least one, if there are elements in A)
+        if length(A) > 0
+            idx_add_nan = rand(eachindex(A), rand(length(A)÷2+1:length(A)))
+            for i in idx_add_nan
+                A[i] = randnan(T; with_nan=with_nan)
+            end
+        end
+    end
+    return A
+end
+
+function testscalars(T; with_nan)
+    if with_nan
+        if T <: Complex
+            return (randn(T), randn(real(T)), true, false, randnan(T; with_nan=with_nan), randnan(real(T); with_nan=with_nan))
+        else
+            return (randn(T), true, false, randnan(T; with_nan=with_nan))
+        end
+    else
+        if T <: Complex
+            return (randn(T), randn(real(T)), true, false)
+        else
+            return (randn(T), true, false)
+        end
+    end
+end
+
 ############################################################################################
 
 @testset "level 1" begin
-    @testset for T in [Float32, Float64, ComplexF32, ComplexF64]
+    @testset for T in [Float32, Float64, ComplexF32, ComplexF64], with_nan in [false, true]
+        rand_func = (args...) -> randnan(args...; with_nan=with_nan)
+
         A = CUDA.rand(T, m)
         B = CuArray{T}(undef, m)
         CUBLAS.copy!(m,A,B)
         @test Array(A) == Array(B)
 
-        @test testf(rmul!, rand(T, 6, 9, 3), Ref(rand()))
-        @test testf(dot, rand(T, m), rand(T, m))
-        @test testf(*, transpose(rand(T, m)), rand(T, m))
-        @test testf(*, rand(T, m)', rand(T, m))
-        @test testf(norm, rand(T, m))
-        @test testf(BLAS.asum, rand(T, m))
-        @test testf(axpy!, Ref(rand()), rand(T, m), rand(T, m))
-        @test testf(axpby!, Ref(rand()), rand(T, m), Ref(rand()), rand(T, m))
+        for α ∈ testscalars(T; with_nan=with_nan)
+            @test testf(rmul!, rand_func(T, 6, 9, 3), Ref(α); nans=with_nan)
+        end
+        @test testf(dot, rand_func(T, m), rand_func(T, m); nans=with_nan)
+        @test testf(*, transpose(rand_func(T, m)), rand_func(T, m); nans=with_nan)
+        @test testf(*, rand_func(T, m)', rand_func(T, m); nans=with_nan)
+        @test testf(norm, rand_func(T, m); nans=with_nan)
+        @test testf(BLAS.asum, rand_func(T, m); nans=with_nan)
+        for α ∈ testscalars(T; with_nan=with_nan)
+            @test testf(axpy!, Ref(α), rand_func(T, m), rand_func(T, m); nans=with_nan)
+        end
+        for α ∈ testscalars(T; with_nan=with_nan), β ∈ testscalars(T; with_nan=with_nan)
+            @test testf(axpby!, Ref(α), rand_func(T, m), Ref(β), rand_func(T, m); nans=with_nan)
+        end
 
         if T <: Complex
-            @test testf(dot, rand(T, m), rand(T, m))
-            x = rand(T, m)
-            y = rand(T, m)
+            @test testf(dot, rand_func(T, m), rand_func(T, m); nans=with_nan)
+            x = rand_func(T, m)
+            y = rand_func(T, m)
             dx = CuArray(x)
             dy = CuArray(y)
             dz = dot(dx, dy)
             z = dot(x, y)
-            @test dz ≈ z
+            @test isapprox(dz, z; nans=with_nan)
         end
 
-        @test testf(rotate!, rand(T, m), rand(T, m), rand(real(T)), rand(real(T)))
-        @test testf(rotate!, rand(T, m), rand(T, m), rand(real(T)), rand(T))
+        # no rot for α complex
+        for α in testscalars(real(T); with_nan=with_nan), β in testscalars(T; with_nan=with_nan)
+            @test testf(rotate!, rand_func(T, m), rand_func(T, m), α, β; nans=with_nan)
+        end
 
-        @test testf(reflect!, rand(T, m), rand(T, m), rand(real(T)), rand(real(T)))
-        @test testf(reflect!, rand(T, m), rand(T, m), rand(real(T)), rand(T))
+        for α in testscalars(real(T); with_nan=with_nan), β in testscalars(T; with_nan=with_nan)
+            @test testf(reflect!, rand_func(T, m), rand_func(T, m), α, β; nans=with_nan)
+        end
 
         # swap is an extension
-        x = rand(T, m)
-        y = rand(T, m)
+        x = rand_func(T, m)
+        y = rand_func(T, m)
         dx = CuArray(x)
         dy = CuArray(y)
         CUBLAS.swap!(m, dx, dy)
         h_x = collect(dx)
         h_y = collect(dy)
-        @test h_x ≈ y
-        @test h_y ≈ x
+        @test isapprox(h_x, y; nans=with_nan)
+        @test isapprox(h_y, x; nans=with_nan)
 
         a = convert.(T, [1.0, 2.0, -0.8, 5.0, 3.0])
         ca = CuArray(a)
         @test BLAS.iamax(a) == CUBLAS.iamax(ca)
         @test CUBLAS.iamin(ca) == 3
     end # level 1 testset
-    @testset for T in [Float16, ComplexF16]
+    @testset for T in [Float16, ComplexF16], with_nan in [false, true]
+        rand_func = (args...) -> randnan(args...; with_nan=with_nan)
+
         A = CuVector(rand(T, m)) # CUDA.rand doesn't work with 16 bit types yet
         B = CuArray{T}(undef, m)
         CUBLAS.copy!(m,A,B)
         @test Array(A) == Array(B)
 
-        @test testf(dot, rand(T, m), rand(T, m))
-        @test testf(*, transpose(rand(T, m)), rand(T, m))
-        @test testf(*, rand(T, m)', rand(T, m))
-        @test testf(norm, rand(T, m))
-        @test testf(axpy!, Ref(rand()), rand(T, m), rand(T, m))
-        @test testf(axpby!, Ref(rand()), rand(T, m), Ref(rand()), rand(T, m))
+        @test testf(dot, rand_func(T, m), rand_func(T, m); nans=with_nan)
+        @test testf(*, transpose(rand_func(T, m)), rand_func(T, m); nans=with_nan)
+        @test testf(*, rand_func(T, m)', rand_func(T, m); nans=with_nan)
+        @test testf(norm, rand_func(T, m); nans=with_nan)
+        for α ∈ testscalars(T; with_nan=with_nan)
+            @test testf(axpy!, Ref(α), rand_func(T, m), rand_func(T, m); nans=with_nan)
+        end
+        for α ∈ testscalars(T; with_nan=with_nan), β ∈ testscalars(T; with_nan=with_nan)
+            @test testf(axpby!, Ref(α), rand_func(T, m), Ref(β), rand_func(T, m); nans=with_nan)
+        end
 
         if T <: Complex
-            @test testf(dot, rand(T, m), rand(T, m))
-            x = rand(T, m)
-            y = rand(T, m)
+            @test testf(dot, rand_func(T, m), rand_func(T, m); nans=with_nan)
+            x = rand_func(T, m)
+            y = rand_func(T, m)
             dx = CuArray(x)
             dy = CuArray(y)
             dz = dot(dx, dy)
             z = dot(x, y)
-            @test dz ≈ z
+            @test isapprox(dz, z; nans=with_nan)
         end
     end # level 1 testset
 end
