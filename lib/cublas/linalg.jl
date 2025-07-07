@@ -6,13 +6,6 @@ using LinearAlgebra: MulAddMul, AdjOrTrans, wrap, UpperOrLowerTriangular
 # BLAS 1
 #
 
-LinearAlgebra.rmul!(x::StridedCuArray{<:CublasFloat}, k::Number) =
-  scal!(length(x), k, x)
-
-# Work around ambiguity with GPUArrays wrapper
-LinearAlgebra.rmul!(x::DenseCuArray{<:CublasFloat}, k::Real) =
-  invoke(rmul!, Tuple{typeof(x), Number}, x, k)
-
 function LinearAlgebra.dot(x::StridedCuVector{T},
                            y::StridedCuVector{T}) where T<:Union{Float16, CublasReal}
     n = length(x)
@@ -128,29 +121,6 @@ function LinearAlgebra.axpy!(alpha::Number, x::StridedCuArray{T}, y::StridedCuAr
     length(x)==length(y) || throw(DimensionMismatch("axpy arguments have lengths $(length(x)) and $(length(y))"))
     axpy!(length(x), alpha, x, y)
 end
-
-function LinearAlgebra.axpby!(alpha::Number, x::StridedCuArray{T}, beta::Number, y::StridedCuArray{T}) where T<:Union{Float16, ComplexF16, CublasFloat}
-    length(x)==length(y) || throw(DimensionMismatch("axpby arguments have lengths $(length(x)) and $(length(y))"))
-    axpby!(length(x), alpha, x, beta, y)
-end
-
-function LinearAlgebra.rotate!(x::StridedCuArray{T}, y::StridedCuArray{T}, c::Number, s::Number) where T<:CublasFloat
-    nx = length(x)
-    ny = length(y)
-    nx==ny || throw(DimensionMismatch("rotate arguments have lengths $nx and $ny"))
-    rot!(nx, x, y, c, s)
-end
-
-function LinearAlgebra.reflect!(x::StridedCuArray{T}, y::StridedCuArray{T}, c::Number, s::Number) where T<:CublasFloat
-    nx = length(x)
-    ny = length(y)
-    nx==ny || throw(DimensionMismatch("reflect arguments have lengths $nx and $ny"))
-    rot!(nx, x, y, c, s)
-    scal!(ny, -real(one(T)), y)
-    x, y
-end
-
-
 
 #
 # BLAS 2
